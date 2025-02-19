@@ -1,5 +1,6 @@
 # Args ref from https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/configs/config_671B.json
 # follow code from https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py
+
 class Args:
     def __init__(self):
         self.vocab_size = 129280
@@ -22,7 +23,7 @@ class Args:
         self.qk_rope_head_dim = 64
         self.v_head_dim = 128
         self.dtype = "fp8"
-        self.attn_impl: Literal["naive", "absorb"] = "absorb"
+        self.attn_impl = "absorb" # ["naive", "absorb"]
 
 args = Args()
 
@@ -30,6 +31,7 @@ args = Args()
 BASE = 1000
 
 def cal_embed_fwd_flops(bs: int, seq_len: int):
+    # y = F.embedding(x, self.weight)
     return 2 * bs * seq_len * args.dim
 
 def cal_head_fwd_flops(bs: int, seq_len: int):
@@ -103,15 +105,19 @@ def cal_mla_fwd_flops(bs: int, seq_len: int, cur_token_id: int):
 def cal_moe_fwd_flops(bs: int, seq_len: int):
 
     flops = 0
-
+    # 1. ignore gate : 
+    # 2. ignore
+    # 3. ignore ……
+    # (in expert, the reason of *3) self.w2(F.silu(self.w1(x)) * self.w3(x))
     flops += 2 * bs * seq_len * args.dim * args.moe_inter_dim * 3
+    # * (dot)
     flops += bs * seq_len * args.moe_inter_dim
 
     return flops
 
 def cal_mlp_fwd_flops(bs: int, seq_len: int):
     flops = 2 * bs * seq_len * args.dim * args.inter_dim * 3
-    # matmal
+    # * (dot)
     flops += bs * seq_len * args.inter_dim
     return flops
 
@@ -123,39 +129,48 @@ def cal_fwd_flops(bs: int, seq_len: int, cur_token_id: int):
     shard_expert_num = 1
     routed_expert_num = 8
 
-    flops_mla = cal_mla_fwd_flops(bs, seq_len, cur_token_id) / seq_len / bs / (BASE**3) * args.n_layers
-    flops_moe = (shard_expert_num + routed_expert_num) * cal_moe_fwd_flops(bs, seq_len) / seq_len / bs / (BASE**3) * (args.n_layers - args.n_dense_layers)
-    flops_mlp = cal_mlp_fwd_flops(bs, seq_len) / seq_len / bs / (BASE**3) * args.n_dense_layers
+    flops_mla = cal_mla_fwd_flops(bs, seq_len, cur_token_id)  / (BASE**3) * args.n_layers
+    flops_moe = (shard_expert_num + routed_expert_num) * cal_moe_fwd_flops(bs, seq_len)  / (BASE**3) * (args.n_layers - args.n_dense_layers)
+    flops_mlp = cal_mlp_fwd_flops(bs, seq_len)   / (BASE**3) * args.n_dense_layers
 
 
-    flops_embed = cal_embed_fwd_flops(bs, seq_len) / seq_len / bs / (BASE**3)
-    flops_head = cal_head_fwd_flops(bs, seq_len) / seq_len / bs / (BASE**3)
+    flops_embed = cal_embed_fwd_flops(bs, seq_len)   / (BASE**3)
+    flops_head = cal_head_fwd_flops(bs, seq_len)   / (BASE**3)
 
-    print(f"flops_mla: {flops_mla} TFLOPS, flops_moe: {flops_moe} TFLOPS")
+    # print(f"flops_mla: {flops_mla} TFLOPS, flops_moe: {flops_moe} TFLOPS")
 
     flops = flops_mla + flops_moe + flops_mlp + flops_embed + flops_head
     
-    print(f"flops: {flops} TFLOPS")
+    # print(f"flops in bs({bs})seq_len: {seq_len}, flops: {flops} TFLOPS")
     return flops
 
 
-bsz = 32
 
 # pre-training context length 4K
-seq_len = 1024 * 4
+# seq_len = 1024 * 4
 
-H100_peak_bf16_flops = 989.5 * 1e12 / BASE**4
-gpu_hours = 2.664 * 3600 / BASE
+# The following five data depend on the specific conditions of the test set and the inference framework + running device.
+bsz = 32
+H100_peak_bf16_flops = 989.5 * 1e12 / BASE**4 # TFLOPS
+gpu_hours = 2.664 * 3600 # seconds
+input_tokens = 1024 
+new_tokens_generated = 512
 
-fwd_flops = cal_fwd_flops(bsz, seq_len)
-bwd_flops = fwd_flops * 2
+total_flops = 0
+# prefill
+total_flops += cal_fwd_flops(bsz, input_tokens, cur_token_id=input_tokens)
+# decode
+for i in range(new_tokens_generated):
+    total_flops += cal_fwd_flops(bsz, 1, cur_token_id=i+input_tokens+1)
 
-MFU = (fwd_flops + bwd_flops) * 14.8 / (gpu_hours  * H100_peak_bf16_flops)
+# bwd_flops = fwd_flops * 2 # in inference, no bwd
+
+MFU = 1000*(total_flops / BASE) / (gpu_hours  * H100_peak_bf16_flops)
 
 print(f"we assume the T, B, M in the paper are in the unit of {BASE}")
 print(f"MFU: {MFU}")
 
-# estimate MFU from parameter numbers
-attn_flosp = 3 * cal_attn_fwd_flops(bsz, seq_len) * args.n_layers / (BASE**3) / (bsz * seq_len)
-MFU_ref = (37*6 + attn_flosp) * 14.8 / (gpu_hours * H100_peak_bf16_flops)
-print(f"ref MFU: {MFU_ref}")
+# # estimate MFU from parameter numbers
+# attn_flosp = 3 * cal_attn_fwd_flops(bsz, seq_len) * args.n_layers / (BASE**3) / (bsz * seq_len)
+# MFU_ref = (37*6 + attn_flosp) * 14.8 / (gpu_hours * H100_peak_bf16_flops)
+# print(f"ref MFU: {MFU_ref}")
