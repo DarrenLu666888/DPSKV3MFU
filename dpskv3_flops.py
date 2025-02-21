@@ -1,31 +1,105 @@
 # Args ref from https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/configs/config_671B.json
 # follow code from https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py
 
-class Args:
-    def __init__(self):
-        self.vocab_size = 129280
-        self.dim = 7168
-        self.inter_dim = 18432
-        self.moe_inter_dim = 2048
-        self.n_layers = 61
-        self.n_dense_layers = 3
-        self.n_heads = 128
-        self.n_routed_experts = 256
-        self.n_shared_experts = 1
-        self.n_activated_experts = 8
-        self.n_expert_groups = 8
-        self.n_limited_groups = 4
-        self.route_scale = 2.5
-        self.score_func = "sigmoid"
-        self.q_lora_rank = 1536
-        self.kv_lora_rank = 512
-        self.qk_nope_head_dim = 128
-        self.qk_rope_head_dim = 64
-        self.v_head_dim = 128
-        self.dtype = "fp8"
-        self.attn_impl = "absorb" # ["naive", "absorb"]
+from typing import Tuple, Optional, Literal
+import json
+from dataclasses import dataclass
 
-args = Args()
+@dataclass
+class ModelArgs:
+    """
+    Data class for defining model arguments and hyperparameters.
+
+    Attributes:
+        max_batch_size (int): Maximum batch size.
+        max_seq_len (int): Maximum sequence length.
+        dtype (Literal["bf16", "fp8"]): Data type for computations.
+        vocab_size (int): Vocabulary size.
+        dim (int): Model dimension.
+        inter_dim (int): Intermediate dimension for MLP layers.
+        moe_inter_dim (int): Intermediate dimension for MoE layers.
+        n_layers (int): Number of transformer layers.
+        n_dense_layers (int): Number of dense layers in the model.
+        n_heads (int): Number of attention heads.
+        n_routed_experts (int): Number of routed experts for MoE layers.
+        n_shared_experts (int): Number of shared experts for MoE layers.
+        n_activated_experts (int): Number of activated experts in MoE layers.
+        n_expert_groups (int): Number of expert groups.
+        n_limited_groups (int): Number of limited groups for MoE routing.
+        score_func (Literal["softmax", "sigmoid"]): Scoring function for MoE routing.
+        route_scale (float): Scaling factor for routing scores.
+        q_lora_rank (int): LoRA rank for query projections.
+        kv_lora_rank (int): LoRA rank for key-value projections.
+        qk_nope_head_dim (int): Dimension for query-key projections without positional embeddings.
+        qk_rope_head_dim (int): Dimension for query-key projections with rotary embeddings.
+        v_head_dim (int): Dimension for value projections.
+        original_seq_len (int): Original sequence length.
+        rope_theta (float): Base for rotary positional encoding.
+        rope_factor (float): Scaling factor for extended sequence lengths.
+        beta_fast (int): Fast beta correction factor.
+        beta_slow (int): Slow beta correction factor.
+        mscale (float): Scaling factor for extended attention.
+    """
+    max_batch_size: int = 8
+    max_seq_len: int = 4096 * 4
+    dtype: Literal["bf16", "fp8"] = "bf16"
+    vocab_size: int = 102400
+    dim: int = 2048
+    inter_dim: int = 10944
+    moe_inter_dim: int = 1408
+    n_layers: int = 27
+    n_dense_layers: int = 1
+    n_heads: int = 16
+    # moe
+    n_routed_experts: int = 64
+    n_shared_experts: int = 2
+    n_activated_experts: int = 6
+    n_expert_groups: int = 1
+    n_limited_groups: int = 1
+    score_func: Literal["softmax", "sigmoid"] = "softmax"
+    route_scale: float = 1.
+    # mla
+    q_lora_rank: int = 0
+    kv_lora_rank: int = 512
+    qk_nope_head_dim: int = 128
+    qk_rope_head_dim: int = 64
+    v_head_dim: int = 128
+    # yarn
+    original_seq_len: int = 4096
+    rope_theta: float = 10000.0
+    rope_factor: float = 40
+    beta_fast: int = 32
+    beta_slow: int = 1
+    mscale: float = 1.
+    # customized args
+    attn_impl: str = 'absorb'
+
+# class Args:
+#     def __init__(self):
+#         self.vocab_size = 129280
+#         self.dim = 7168
+#         self.inter_dim = 18432
+#         self.moe_inter_dim = 2048
+#         self.n_layers = 61
+#         self.n_dense_layers = 3
+#         self.n_heads = 128
+#         self.n_routed_experts = 256
+#         self.n_shared_experts = 1
+#         self.n_activated_experts = 8
+#         self.n_expert_groups = 8
+#         self.n_limited_groups = 4
+#         self.route_scale = 2.5
+#         self.score_func = "sigmoid"
+#         self.q_lora_rank = 1536
+#         self.kv_lora_rank = 512
+#         self.qk_nope_head_dim = 128
+#         self.qk_rope_head_dim = 64
+#         self.v_head_dim = 128
+#         self.dtype = "fp8"
+#         self.attn_impl = "absorb" # ["naive", "absorb"]
+
+with open('configs/config_16B.json') as f:
+    args = ModelArgs(**json.load(f))
 
 # we assume the T, B, M in the paper are in the unit of 1000
 BASE = 1000
@@ -51,7 +125,6 @@ def cal_head_fwd_flops(bs: int, seq_len: int):
 def cal_mla_fwd_flops(bs: int, seq_len: int, cur_token_id: int):
     flops = 0
 
-    # 192
     args.qk_head_dim = args.qk_nope_head_dim + args.qk_rope_head_dim
 
     # Q down + up
@@ -126,11 +199,8 @@ def cal_fwd_flops(bs: int, seq_len: int, cur_token_id: int):
         flops (TFLOPS) per token
     """
 
-    shard_expert_num = 1
-    routed_expert_num = 8
-
     flops_mla = cal_mla_fwd_flops(bs, seq_len, cur_token_id)  / (BASE**3) * args.n_layers
-    flops_moe = (shard_expert_num + routed_expert_num) * cal_moe_fwd_flops(bs, seq_len)  / (BASE**3) * (args.n_layers - args.n_dense_layers)
+    flops_moe = (args.n_shared_experts + args.n_activated_experts) * cal_moe_fwd_flops(bs, seq_len)  / (BASE**3) * (args.n_layers - args.n_dense_layers)
     flops_mlp = cal_mlp_fwd_flops(bs, seq_len)   / (BASE**3) * args.n_dense_layers
 
 
@@ -150,15 +220,16 @@ def cal_fwd_flops(bs: int, seq_len: int, cur_token_id: int):
 # seq_len = 1024 * 4
 
 # The following five data depend on the specific conditions of the test set and the inference framework + running device.
-bsz = 32
+bsz = 2
 H100_peak_bf16_flops = 989.5 * 1e12 / BASE**4 # TFLOPS
 gpu_hours = 2.664 * 3600 # seconds
-input_tokens = 1024 
+input_tokens = 128 
 new_tokens_generated = 512
 
 total_flops = 0
 # prefill
 total_flops += cal_fwd_flops(bsz, input_tokens, cur_token_id=input_tokens)
+print('prefill flops: {:.2f} TFLOPS', total_flops)
 # decode
 for i in range(new_tokens_generated):
     total_flops += cal_fwd_flops(bsz, 1, cur_token_id=i+input_tokens+1)
