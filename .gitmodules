@@ -1,0 +1,3 @@
+[submodule "DeepSeek-V3"]
+	path = DeepSeek-V3
+	url = https://github.com/deepseek-ai/DeepSeek-V3.git
