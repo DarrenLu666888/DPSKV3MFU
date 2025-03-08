@@ -1,0 +1,24 @@
+world_size:  8
+now rank:  4
+ModelArgs(max_batch_size=8, max_seq_len=16384, dtype='fp8', vocab_size=129280, dim=7168, inter_dim=18432, moe_inter_dim=2048, n_layers=61, n_dense_layers=3, n_heads=128, n_routed_experts=256, n_shared_experts=1, n_activated_experts=8, n_expert_groups=8, n_limited_groups=4, score_func='sigmoid', route_scale=2.5, q_lora_rank=1536, kv_lora_rank=512, qk_nope_head_dim=128, qk_rope_head_dim=64, v_head_dim=128, original_seq_len=4096, rope_theta=10000.0, rope_factor=40, beta_fast=32, beta_slow=1, mscale=1.0)
+now rank:  0
+now rank:  3
+now rank:  1
+now rank:  2
+now rank:  5
+now rank:  7
+now rank:  6
+------------------------------------------------------------------------------------------------------------------------
+|               weight name                |          weight shape          |   number   |      dtype       | space(Bytes) |
+------------------------------------------------------------------------------------------------------------------------
+| embed.weight                             | torch.Size([16160, 7168])      | 115834880  | torch.bfloat16   | 231669760    |
+| layers.0.attn.wq_a.weight                | torch.Size([1536, 7168])       | 11010048   | torch.float8_e4m3fn | 11010048     |
+------------------------------------------------------------------------------------------
+The total number of parameters splited by world_size: 83754534960(83.75B)
+The total number of parameters not splited by world_size: 1030977752(1.03B)
+The total number of parameters: 84785512712(84.79B)
+------------------------------------------------------------------------------------------
+The space of parameters splited by world_size: 84001497280(78.23B)
+The space of parameters not splited by world_size: 1138603872(1.06B)
+The space of parameters: 85140101152(79.29GB)
+------------------------------------------------------------------------------------------
