@@ -125,5 +125,10 @@ if (__name__ == '__main__'):
     with torch.device("cuda"):
         model = Transformer(args)
         model_structure(model)
+
+    model(torch.randint(0, args.vocab_size, (1, 128)).cuda())
+
+
+        # print(torch.cuda.memory_summary())
     if world_size > 1:
         dist.destroy_process_group()
