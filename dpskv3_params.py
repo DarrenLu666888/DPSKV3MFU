@@ -20,6 +20,9 @@ def model_structure(model):
     print('-' * 120)
     num_para_y = 0 # number of parameters in all layers splited by world_size
     num_para_n = 0 # number of parameters in all layers not splited by world_size
+    num_para_fp32 = 0
+    num_para_bf16 = 0
+    num_para_fp8 = 0
     total_space_y = 0 # space of parameters in all layers splited by world_size
     total_space_n = 0 # space of parameters in all layers not splited by world_size
 
@@ -42,6 +45,12 @@ def model_structure(model):
         if len(str_num) <= 10:
             str_num = str_num + (10 - len(str_num)) * blank
         str_dtype = str(w_variable.dtype)
+        if ('32' in str_dtype):
+            num_para_fp32 += each_para
+        elif ('16' in str_dtype):
+            num_para_bf16 += each_para
+        elif ('8' in str_dtype):
+            num_para_fp8 += each_para
         if len(str_dtype) <= 16:
             str_dtype = str_dtype + (16 - len(str_dtype)) * blank
         str_space = each_para * w_variable.itemsize
@@ -55,10 +64,10 @@ def model_structure(model):
         # now_rank = rank
         # if (len(str(now_rank)) <= 4):
         #     now_rank = str(now_rank) + (4 - len(str(now_rank))) * blank
-        if (index < 2):
-            print('| {} | {} | {} | {} | {} |'.format(key, shape, str_num, str_dtype, str_space))
+        # if (index < 2):
+        print('| {} | {} | {} | {} | {} |'.format(key, shape, str_num, str_dtype, str_space))
         
-        
+    
     print('-' * 90)
     print('The total number of parameters splited by world_size: ' + str(num_para_y) + '(%.2fB)' % (num_para_y / ((1000**3))))
     print('The total number of parameters not splited by world_size: ' + str(num_para_n) + '(%.2fB)' % (num_para_n / ((1000**3))))
@@ -70,6 +79,9 @@ def model_structure(model):
     total_space = total_space_y + total_space_n
     print('The space of parameters: ' + str(total_space) + '(%.2fGB)' % (total_space / ((1024**3))))
     print('-' * 90)
+    print('The number of parameters with float32: ' + str(num_para_fp32) + '(%.2fB)' % (num_para_fp32 / ((1000**3))))
+    print('The number of parameters with bfloat16: ' + str(num_para_bf16) + '(%.2fB)' % (num_para_bf16 / ((1000**3))))
+    print('The number of parameters with float8: ' + str(num_para_fp8) + '(%.2fB)' % (num_para_fp8 / ((1000**3))))
 
 # model_structure(net)
 if (__name__ == '__main__'):

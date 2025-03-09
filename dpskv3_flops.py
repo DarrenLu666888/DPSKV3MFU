@@ -98,7 +98,7 @@ class ModelArgs:
 #         self.dtype = "fp8"
 #         self.attn_impl = "absorb" # ["naive", "absorb"]
 
-with open('configs/config_16B.json') as f:
+with open('DeepSeek-V3/inference/configs/config_671B.json') as f:
     args = ModelArgs(**json.load(f))
 
 # we assume the T, B, M in the paper are in the unit of 1000
@@ -199,13 +199,13 @@ def cal_fwd_flops(bs: int, seq_len: int, cur_token_id: int):
         flops (TFLOPS) per token
     """
 
-    flops_mla = cal_mla_fwd_flops(bs, seq_len, cur_token_id)  / (BASE**3) * args.n_layers
-    flops_moe = (args.n_shared_experts + args.n_activated_experts) * cal_moe_fwd_flops(bs, seq_len)  / (BASE**3) * (args.n_layers - args.n_dense_layers)
-    flops_mlp = cal_mlp_fwd_flops(bs, seq_len)   / (BASE**3) * args.n_dense_layers
+    flops_mla = cal_mla_fwd_flops(bs, seq_len, cur_token_id)  / (BASE**4) * args.n_layers
+    flops_moe = (args.n_shared_experts + args.n_activated_experts) * cal_moe_fwd_flops(bs, seq_len)  / (BASE**4) * (args.n_layers - args.n_dense_layers)
+    flops_mlp = cal_mlp_fwd_flops(bs, seq_len)   / (BASE**4) * args.n_dense_layers
 
 
-    flops_embed = cal_embed_fwd_flops(bs, seq_len)   / (BASE**3)
-    flops_head = cal_head_fwd_flops(bs, seq_len)   / (BASE**3)
+    flops_embed = cal_embed_fwd_flops(bs, seq_len)   / (BASE**4)
+    flops_head = cal_head_fwd_flops(bs, seq_len)   / (BASE**4)
 
     # print(f"flops_mla: {flops_mla} TFLOPS, flops_moe: {flops_moe} TFLOPS")
 
@@ -220,20 +220,22 @@ def cal_fwd_flops(bs: int, seq_len: int, cur_token_id: int):
 # seq_len = 1024 * 4
 
 # The following five data depend on the specific conditions of the test set and the inference framework + running device.
-bsz = 2
+bsz = 8
 H100_peak_bf16_flops = 989.5 * 1e12 / BASE**4 # TFLOPS
 gpu_hours = 2.664 * 3600 # seconds
 input_tokens = 128 
-new_tokens_generated = 512
+new_tokens_generated = 4096 * 4 - input_tokens
 
 total_flops = 0
 # prefill
 total_flops += cal_fwd_flops(bsz, input_tokens, cur_token_id=input_tokens)
-print('prefill flops: {:.2f} TFLOPS', total_flops)
+print('prefill flops: {:.2f} TFLOPs', total_flops)
 # decode
 for i in range(new_tokens_generated):
-    total_flops += cal_fwd_flops(bsz, 1, cur_token_id=i+input_tokens+1)
-
+    tmp_flops = cal_fwd_flops(bsz, 1, cur_token_id=i+input_tokens+1)
+    total_flops += tmp_flops
+    # print(f"decode flops in token {i+input_tokens+1}: {tmp_flops} TFLOPS")
+print('flops/per token: {:.2f} TFLOPs', total_flops/(4096*4*8))
 # bwd_flops = fwd_flops * 2 # in inference, no bwd
 
 MFU = 1000*(total_flops / BASE) / (gpu_hours  * H100_peak_bf16_flops)
@@ -242,6 +244,6 @@ print(f"we assume the T, B, M in the paper are in the unit of {BASE}")
 print(f"MFU: {MFU}")
 
 # # estimate MFU from parameter numbers
-# attn_flosp = 3 * cal_attn_fwd_flops(bsz, seq_len) * args.n_layers / (BASE**3) / (bsz * seq_len)
+# attn_flosp = 3 * cal_attn_fwd_flops(bsz, seq_len) * args.n_layers / (BASE**4) / (bsz * seq_len)
 # MFU_ref = (37*6 + attn_flosp) * 14.8 / (gpu_hours * H100_peak_bf16_flops)
 # print(f"ref MFU: {MFU_ref}")
